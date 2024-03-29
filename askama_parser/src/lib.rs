@@ -44,6 +44,68 @@ mod _parsed {
             let ast = Ast::from_str(src, syntax)?;
             Ok(Self { ast, source })
         }
+        pub fn only_block(
+            source: String,
+            syntax: &Syntax<'_>,
+            block: &str,
+        ) -> Result<Self, ParseError> {
+            let src = unsafe { mem::transmute::<&str, &'static str>(source.as_str()) };
+            let ast = Ast::from_str(src, syntax)?;
+            let ast = find_block(ast, block)?;
+            return Ok(Self { ast, source });
+            fn find_block<'a>(ast: Ast<'a>, block: &str) -> Result<Ast<'a>, ParseError> {
+                for node in ast.nodes {
+                    use Node::*;
+                    match node {
+                        Macro(_)
+                        | Import(_)
+                        | Include(_)
+                        | Extends(_)
+                        | Lit(_)
+                        | Comment(_)
+                        | Expr(_, _)
+                        | Call(_)
+                        | Raw(_)
+                        | Break(_)
+                        | Continue(_)
+                        | FilterBlock(_)
+                        | Let(_) => {}
+                        If(i) => {
+                            for branch in i.branches {
+                                let inner = branch.nodes;
+                                if let Ok(block) = find_block(Ast { nodes: inner }, block) {
+                                    return Ok(block);
+                                }
+                            }
+                        }
+                        Match(i) => {
+                            for branch in i.arms {
+                                let nodes = branch.nodes;
+                                if let Ok(block) = find_block(Ast { nodes }, block) {
+                                    return Ok(block);
+                                }
+                            }
+                        }
+                        Loop(i) => {
+                            let nodes = i.body;
+                            if let Ok(block) = find_block(Ast { nodes }, block) {
+                                return Ok(block);
+                            }
+                        }
+                        BlockDef(i) => {
+                            if i.name == block {
+                                return Ok(Ast { nodes: i.nodes });
+                            }
+                            let nodes = i.nodes;
+                            if let Ok(block) = find_block(Ast { nodes }, block) {
+                                return Ok(block);
+                            }
+                        }
+                    }
+                }
+                Err(ParseError(format!("block {} could not be found", block)))
+            }
+        }
 
         // The return value's lifetime must be limited to `self` to uphold the unsafe invariant.
         pub fn nodes(&self) -> &[Node<'_>] {

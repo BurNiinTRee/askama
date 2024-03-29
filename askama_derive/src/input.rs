@@ -20,6 +20,7 @@ pub(crate) struct TemplateInput<'a> {
     pub(crate) ext: Option<&'a str>,
     pub(crate) mime_type: String,
     pub(crate) path: PathBuf,
+    pub(crate) block: Option<&'a str>,
 }
 
 impl TemplateInput<'_> {
@@ -37,6 +38,7 @@ impl TemplateInput<'_> {
             escaping,
             ext,
             syntax,
+            block,
             ..
         } = args;
 
@@ -97,6 +99,7 @@ impl TemplateInput<'_> {
             ext: ext.as_deref(),
             mime_type,
             path,
+            block: block.as_deref(),
         })
     }
 
@@ -112,7 +115,10 @@ impl TemplateInput<'_> {
         let mut dependency_graph = Vec::new();
         let mut check = vec![(self.path.clone(), source)];
         while let Some((path, source)) = check.pop() {
-            let parsed = Parsed::new(source, self.syntax)?;
+            let parsed = match self.block {
+                Some(block) => Parsed::only_block(source, self.syntax, block)?,
+                None => Parsed::new(source, self.syntax)?,
+            };
 
             let mut top = true;
             let mut nested = vec![parsed.nodes()];
@@ -212,6 +218,7 @@ pub(crate) struct TemplateArgs {
     ext: Option<String>,
     syntax: Option<String>,
     config: Option<String>,
+    block: Option<String>,
     pub(crate) whitespace: Option<String>,
 }
 
@@ -320,6 +327,12 @@ impl TemplateArgs {
                     args.whitespace = Some(s.value())
                 } else {
                     return Err("whitespace value must be string literal".into());
+                }
+            } else if ident == "block" {
+                if let syn::Lit::Str(s) = value.lit {
+                    args.block = Some(s.value())
+                } else {
+                    return Err("block value must be a string literal".into());
                 }
             } else {
                 return Err(format!("unsupported attribute key {ident:?} found").into());
